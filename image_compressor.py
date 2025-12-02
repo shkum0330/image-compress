@@ -7,8 +7,9 @@ import subprocess
 import json
 import time
 import threading
+import shutil  # ★ 파일 복사/이동을 위해 다시 추가
 
-# Watchdog 라이브러리
+# Watchdog 라이브러리 임포트
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
@@ -16,7 +17,7 @@ except ImportError:
     messagebox.showerror("라이브러리 오류", "watchdog 라이브러리가 필요합니다.\npip install watchdog")
     exit()
 
-# TkinterDnD2 라이브러리
+# TkinterDnD2 라이브러리 임포트
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 except ImportError:
@@ -28,7 +29,7 @@ CONFIG_FILE = 'compressor_config.json'
 file_list = []
 save_directory = os.path.join(os.path.expanduser('~'), 'Downloads')
 
-# 10MB 기준 설정
+# ★ 10MB 기준 설정 (10 * 1024 * 1024 bytes)
 SIZE_THRESHOLD = 10 * 1024 * 1024
 
 # 자동 감시 관련 변수
@@ -64,10 +65,10 @@ def load_config():
         save_config()
 
 
-# --- 메인 기능 함수 (조건부 압축) ---
+# --- 핵심 기능 함수 (조건부 압축 & 표식 남기기) ---
 def compress_image(input_path, output_dir):
     try:
-        # 파일이 완전히 저장될 때까지 잠시 대기 (파일 잠금 방지)
+        # 파일 저장 완료 대기 (파일 잠금 방지)
         time.sleep(0.5)
 
         # 1. 파일 크기 확인
@@ -77,7 +78,7 @@ def compress_image(input_path, output_dir):
 
         # 2. 용량에 따른 분기 처리
         if file_size > SIZE_THRESHOLD:
-            # [Case A] 10MB 초과 -> 압축 수행
+            # [Case A] 10MB 초과 -> 압축 수행 (_compressed)
             img = Image.open(input_path)
 
             new_filename = f"{name}_compressed.jpg"
@@ -90,8 +91,17 @@ def compress_image(input_path, output_dir):
             return f"{new_filename} (압축됨)"
 
         else:
-            # [Case B] 10MB 이하 -> 아무것도 하지 않음 (Skip)
-            return f"{filename} (10MB이하-건너뜀)"
+            # [Case B] 10MB 이하 -> 원본 복사 + 이름 변경 (_original)
+            new_filename = f"{name}_original{ext}"
+            output_path = os.path.join(output_dir, new_filename)
+
+            # 원본 경로와 저장 경로가 같으면 충돌 방지
+            if os.path.abspath(input_path) == os.path.abspath(output_path):
+                return f"{filename} (변경없음)"
+
+            # 단순 복사 (shutil 사용)
+            shutil.copy2(input_path, output_path)
+            return f"{new_filename} (원본복사)"
 
     except Exception as e:
         return f"오류 ({os.path.basename(input_path)}): {e}"
@@ -112,16 +122,14 @@ def open_save_folder():
         messagebox.showwarning("폴더 열기 실패", f"폴더를 여는 데 실패했습니다: {e}")
 
 
-# --- Watchdog 이벤트 핸들러 ---
+# --- Watchdog 이벤트 핸들러 클래스 ---
 class ImageHandler(FileSystemEventHandler):
     def __init__(self):
-        # 마지막 처리 시간을 기록하여 중복 실행 방지 (쿨타임)
         self.last_processed_time = 0
 
     def on_created(self, event):
         self.process(event)
 
-    # 덮어쓰기 감지
     def on_modified(self, event):
         self.process(event)
 
@@ -136,12 +144,12 @@ class ImageHandler(FileSystemEventHandler):
             # 쿨타임 로직 (1초 이내 재실행 방지)
             current_time = time.time()
             if current_time - self.last_processed_time < 1.0:
-                return  # 1초가 안 지났으면 무시
+                return
 
             self.last_processed_time = current_time
             print(f"감지됨(덮어쓰기 포함): {filename}")
 
-            # 압축 수행
+            # 처리 수행
             result_msg = compress_image(event.src_path, save_directory)
 
             # GUI 업데이트
@@ -183,7 +191,6 @@ def toggle_watch():
             messagebox.showwarning("경고", "감지할 파일명을 입력해주세요.")
             return
 
-        # 핸들러 생성 시 쿨타임 변수 초기화됨
         event_handler = ImageHandler()
         observer = Observer()
         observer.schedule(event_handler, watch_directory, recursive=False)
@@ -192,7 +199,7 @@ def toggle_watch():
             observer.start()
             is_watching = True
             btn_watch_toggle.config(text="감시 중지 (작동 중)", bg="red", fg="white")
-            status_label.config(text=f"'{target_filename}' (덮어쓰기 감지 중) 감시 중...")
+            status_label.config(text=f"'{target_filename}' (10MB 기준 분기 처리) 감시 중...")
             entry_filename.config(state="disabled")
             btn_watch_dir.config(state="disabled")
         except Exception as e:
@@ -227,7 +234,7 @@ def drop_handler(event):
 
 def select_save_directory():
     global save_directory
-    path = filedialog.askdirectory(title="압축된 파일을 저장할 폴더 선택")
+    path = filedialog.askdirectory(title="처리된 파일을 저장할 폴더 선택")
     if path:
         save_directory = path
         update_save_dir_label()
@@ -263,12 +270,13 @@ def start_compression():
         listbox.delete(i)
         listbox.insert(i, f"[결과] {result_msg}")
 
-        if "압축됨" in result_msg:
+        # 압축되거나 복사된 경우 모두 카운트
+        if "오류" not in result_msg:
             compressed_count += 1
 
-    status_label.config(text=f"작업 완료! (총 {compressed_count}개 파일 압축됨)")
+    status_label.config(text=f"작업 완료! (총 {compressed_count}개 파일 처리됨)")
     messagebox.showinfo("완료", f"작업이 완료되었습니다.\n"
-                              f"실제 압축된 파일: {compressed_count}개\n"
+                              f"총 처리 파일: {compressed_count}개\n"
                               f"저장 폴더: {save_directory}")
     file_list.clear()
 
@@ -277,7 +285,7 @@ def start_compression():
 load_config()
 
 root = TkinterDnD.Tk()
-root.title("이미지 용량 축소기 v6.3 (덮어쓰기 감지)")
+root.title("이미지 용량 축소기 v6.4 (10MB 분기 처리)")
 root.minsize(420, 600)
 
 root.drop_target_register(DND_FILES)
@@ -296,7 +304,7 @@ middle_frame.pack(fill="x")
 separator = tk.Frame(root, height=2, bd=1, relief="sunken")
 separator.pack(fill="x", padx=10, pady=10)
 
-auto_frame = tk.LabelFrame(root, text=" 자동 감시 설정 (10MB 이상 & 덮어쓰기 포함) ", padx=10, pady=10)
+auto_frame = tk.LabelFrame(root, text=" 자동 감시 설정 ", padx=10, pady=10)
 auto_frame.pack(fill="x", padx=20, pady=5)
 
 bottom_frame = tk.Frame(root, pady=10)
