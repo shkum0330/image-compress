@@ -7,7 +7,7 @@ import subprocess
 import json
 import time
 import threading
-import shutil  # ★ 파일 복사/이동을 위해 다시 추가
+import shutil
 
 # Watchdog 라이브러리 임포트
 try:
@@ -27,21 +27,33 @@ except ImportError:
 # --- 전역 변수 ---
 CONFIG_FILE = 'compressor_config.json'
 file_list = []
-save_directory = os.path.join(os.path.expanduser('~'), 'Downloads')
-
-# ★ 10MB 기준 설정 (10 * 1024 * 1024 bytes)
+# 10MB 기준 설정
 SIZE_THRESHOLD = 10 * 1024 * 1024
+
+# 설정값 기본 초기화
+watch_directory = ""
+target_filename_input = "screenshot.png"
 
 # 자동 감시 관련 변수
 observer = None
-watch_directory = ""
 target_filename = ""
 is_watching = False
 
 
-# --- 경로 저장/로드 함수 ---
+# --- 설정 저장/로드 함수 (저장 경로 제거됨) ---
 def save_config():
-    config = {'save_directory': save_directory}
+    """ 현재 설정(감시폴더, 파일명)을 JSON에 저장 """
+    current_filename = "screenshot.png"
+    try:
+        if 'entry_filename' in globals():
+            current_filename = entry_filename.get()
+    except:
+        pass
+
+    config = {
+        'watch_directory': watch_directory,
+        'target_filename': current_filename
+    }
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=4)
@@ -50,37 +62,44 @@ def save_config():
 
 
 def load_config():
-    global save_directory
+    """ JSON에서 설정 불러오기 """
+    global watch_directory, target_filename_input
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-            path = config.get('save_directory')
-            if path and os.path.isdir(path):
-                save_directory = path
-            else:
-                save_directory = os.path.join(os.path.expanduser('~'), 'Downloads')
-                save_config()
+
+            # 감시 폴더 로드
+            w_path = config.get('watch_directory')
+            if w_path and os.path.isdir(w_path):
+                watch_directory = w_path
+
+            # 타겟 파일명 로드
+            t_name = config.get('target_filename')
+            if t_name:
+                target_filename_input = t_name
+
     except (FileNotFoundError, json.JSONDecodeError):
-        save_directory = os.path.join(os.path.expanduser('~'), 'Downloads')
         save_config()
 
 
-# --- 핵심 기능 함수 (조건부 압축 & 표식 남기기) ---
-def compress_image(input_path, output_dir):
+# --- 핵심 기능 함수 ---
+def compress_image(input_path):
+    """
+    입력된 파일의 경로(input_path)와 동일한 폴더에 결과물을 저장합니다.
+    """
     try:
-        # 파일 저장 완료 대기 (파일 잠금 방지)
-        time.sleep(0.5)
+        time.sleep(0.5)  # 파일 잠금 방지
 
-        # 1. 파일 크기 확인
+        # ★ 저장 경로는 원본 파일이 있는 폴더
+        output_dir = os.path.dirname(input_path)
+
         file_size = os.path.getsize(input_path)
         filename = os.path.basename(input_path)
         name, ext = os.path.splitext(filename)
 
-        # 2. 용량에 따른 분기 처리
         if file_size > SIZE_THRESHOLD:
-            # [Case A] 10MB 초과 -> 압축 수행 (_compressed)
+            # [Case A] 10MB 초과 -> 압축
             img = Image.open(input_path)
-
             new_filename = f"{name}_compressed.jpg"
             output_path = os.path.join(output_dir, new_filename)
 
@@ -89,17 +108,15 @@ def compress_image(input_path, output_dir):
 
             img.save(output_path, "JPEG", quality=85, optimize=True)
             return f"{new_filename} (압축됨)"
-
         else:
-            # [Case B] 10MB 이하 -> 원본 복사 + 이름 변경 (_original)
+            # [Case B] 10MB 이하 -> 원본 복사
             new_filename = f"{name}_original{ext}"
             output_path = os.path.join(output_dir, new_filename)
 
-            # 원본 경로와 저장 경로가 같으면 충돌 방지
+            # 원본과 대상 경로가 같으면 생략
             if os.path.abspath(input_path) == os.path.abspath(output_path):
                 return f"{filename} (변경없음)"
 
-            # 단순 복사 (shutil 사용)
             shutil.copy2(input_path, output_path)
             return f"{new_filename} (원본복사)"
 
@@ -107,22 +124,26 @@ def compress_image(input_path, output_dir):
         return f"오류 ({os.path.basename(input_path)}): {e}"
 
 
-def open_save_folder():
-    if not os.path.isdir(save_directory):
-        messagebox.showerror("오류", f"저장 폴더를 찾을 수 없습니다:\n{save_directory}")
+def open_watch_folder():
+    """ 감시 폴더 열기 (저장 폴더 대신 사용) """
+    target_dir = watch_directory
+
+    if not target_dir or not os.path.isdir(target_dir):
+        messagebox.showwarning("알림", "설정된 감시 폴더가 없습니다.")
         return
+
     try:
         if platform.system() == "Windows":
-            os.startfile(save_directory)
+            os.startfile(target_dir)
         elif platform.system() == "Darwin":
-            subprocess.run(["open", save_directory])
+            subprocess.run(["open", target_dir])
         else:
-            subprocess.run(["xdg-open", save_directory])
+            subprocess.run(["xdg-open", target_dir])
     except Exception as e:
         messagebox.showwarning("폴더 열기 실패", f"폴더를 여는 데 실패했습니다: {e}")
 
 
-# --- Watchdog 이벤트 핸들러 클래스 ---
+# --- Watchdog 핸들러 ---
 class ImageHandler(FileSystemEventHandler):
     def __init__(self):
         self.last_processed_time = 0
@@ -139,20 +160,16 @@ class ImageHandler(FileSystemEventHandler):
 
         filename = os.path.basename(event.src_path)
 
-        # 타겟 파일명이 일치하는지 확인
         if filename == target_filename:
-            # 쿨타임 로직 (1초 이내 재실행 방지)
             current_time = time.time()
             if current_time - self.last_processed_time < 1.0:
                 return
 
             self.last_processed_time = current_time
-            print(f"감지됨(덮어쓰기 포함): {filename}")
+            print(f"감지됨: {filename}")
 
-            # 처리 수행
-            result_msg = compress_image(event.src_path, save_directory)
-
-            # GUI 업데이트
+            # 압축 수행 (경로 전달 불필요, 내부에서 처리)
+            result_msg = compress_image(event.src_path)
             root.after(0, lambda: update_status_from_thread(f"[자동] {result_msg}"))
 
 
@@ -161,13 +178,23 @@ def update_status_from_thread(msg):
     listbox.see(tk.END)
 
 
-# --- 자동 감시 제어 함수 ---
+# --- 제어 함수 ---
 def select_watch_folder():
     global watch_directory
     path = filedialog.askdirectory(title="감시할 폴더 선택")
     if path:
         watch_directory = path
-        watch_dir_label.config(text=f"...{path[-30:]}" if len(path) > 30 else path)
+        update_watch_dir_label()
+        save_config()
+
+
+def update_watch_dir_label():
+    """ 감시 폴더 레이블 업데이트 """
+    if watch_directory:
+        text = f"...{watch_directory[-30:]}" if len(watch_directory) > 30 else watch_directory
+        watch_dir_label.config(text=text)
+    else:
+        watch_dir_label.config(text="(선택 없음)")
 
 
 def toggle_watch():
@@ -184,6 +211,8 @@ def toggle_watch():
         btn_watch_dir.config(state="normal")
     else:
         target_filename = entry_filename.get().strip()
+        save_config()
+
         if not watch_directory or not os.path.isdir(watch_directory):
             messagebox.showwarning("경고", "먼저 감시할 폴더를 선택해주세요.")
             return
@@ -199,14 +228,14 @@ def toggle_watch():
             observer.start()
             is_watching = True
             btn_watch_toggle.config(text="감시 중지 (작동 중)", bg="red", fg="white")
-            status_label.config(text=f"'{target_filename}' (10MB 기준 분기 처리) 감시 중...")
+            status_label.config(text=f"'{target_filename}' 감시 중...")
             entry_filename.config(state="disabled")
             btn_watch_dir.config(state="disabled")
         except Exception as e:
             messagebox.showerror("오류", f"감시 시작 실패: {e}")
 
 
-# --- GUI 이벤트 핸들러 (수동) ---
+# --- GUI 이벤트 핸들러 ---
 def add_files_to_list(files_to_add):
     for f in files_to_add:
         f_cleaned = f.strip('{}')
@@ -232,29 +261,9 @@ def drop_handler(event):
     add_files_to_list(files)
 
 
-def select_save_directory():
-    global save_directory
-    path = filedialog.askdirectory(title="처리된 파일을 저장할 폴더 선택")
-    if path:
-        save_directory = path
-        update_save_dir_label()
-        save_config()
-
-
-def update_save_dir_label():
-    display_path = save_directory
-    if len(display_path) > 35:
-        display_path = "..." + display_path[-32:]
-    save_dir_label.config(text=f"저장 위치: {display_path}")
-
-
 def start_compression():
     if not file_list:
         messagebox.showwarning("경고", "먼저 파일을 선택하거나 드래그해주세요.")
-        return
-    if not os.path.exists(save_directory):
-        messagebox.showerror("오류", f"저장 위치를 찾을 수 없습니다: {save_directory}\n"
-                                   "'저장 폴더 변경' 버튼으로 위치를 다시 설정해주세요.")
         return
 
     status_label.config(text="수동 작업 진행 중...")
@@ -265,19 +274,19 @@ def start_compression():
         listbox.insert(tk.END, f"[처리 중...] {os.path.basename(file_path)}")
         root.update_idletasks()
 
-        result_msg = compress_image(file_path, save_directory)
+        # 수동 압축 시에도 원본 폴더에 저장
+        result_msg = compress_image(file_path)
 
         listbox.delete(i)
         listbox.insert(i, f"[결과] {result_msg}")
 
-        # 압축되거나 복사된 경우 모두 카운트
         if "오류" not in result_msg:
             compressed_count += 1
 
     status_label.config(text=f"작업 완료! (총 {compressed_count}개 파일 처리됨)")
     messagebox.showinfo("완료", f"작업이 완료되었습니다.\n"
                               f"총 처리 파일: {compressed_count}개\n"
-                              f"저장 폴더: {save_directory}")
+                              f"결과물 위치: 원본 파일과 동일 폴더")
     file_list.clear()
 
 
@@ -285,8 +294,8 @@ def start_compression():
 load_config()
 
 root = TkinterDnD.Tk()
-root.title("이미지 용량 축소기 v6.4 (10MB 분기 처리)")
-root.minsize(420, 600)
+root.title("이미지 용량 축소기 v7.0 (In-Place)")
+root.minsize(420, 550)
 
 root.drop_target_register(DND_FILES)
 root.dnd_bind('<<Drop>>', drop_handler)
@@ -295,8 +304,7 @@ root.dnd_bind('<<Drop>>', drop_handler)
 top_frame = tk.Frame(root, pady=10)
 top_frame.pack()
 
-save_frame = tk.Frame(root, pady=5)
-save_frame.pack(fill="x", padx=20)
+# ★ 저장 폴더 프레임 삭제됨 (더 깔끔해짐)
 
 middle_frame = tk.Frame(root, pady=5)
 middle_frame.pack(fill="x")
@@ -304,7 +312,7 @@ middle_frame.pack(fill="x")
 separator = tk.Frame(root, height=2, bd=1, relief="sunken")
 separator.pack(fill="x", padx=10, pady=10)
 
-auto_frame = tk.LabelFrame(root, text=" 자동 감시 설정 ", padx=10, pady=10)
+auto_frame = tk.LabelFrame(root, text=" 자동 감시 설정 (10MB 이상 & 덮어쓰기) ", padx=10, pady=10)
 auto_frame.pack(fill="x", padx=20, pady=5)
 
 bottom_frame = tk.Frame(root, pady=10)
@@ -314,17 +322,13 @@ bottom_frame.pack(fill="x")
 btn_select = tk.Button(top_frame, text="파일 선택 (수동)", width=15, command=select_files)
 btn_select.pack()
 
-save_dir_label = tk.Label(save_frame, text="", anchor="w")
-save_dir_label.pack(side="left", fill="x", expand=True, padx=5)
-
-btn_save_dir = tk.Button(save_frame, text="저장 폴더 변경", width=12, command=select_save_directory)
-btn_save_dir.pack(side="right")
-update_save_dir_label()
+# 안내 라벨 (저장 위치 설명)
+tk.Label(top_frame, text="※ 결과물은 원본 폴더에 저장됩니다.", fg="gray").pack(pady=2)
 
 list_label = tk.Label(middle_frame, text="--- 상태 로그 / 드래그 드롭 ---")
 list_label.pack()
 
-listbox = tk.Listbox(middle_frame, height=8)
+listbox = tk.Listbox(middle_frame, height=10)
 listbox.pack(pady=5, padx=20, fill="x")
 
 # 자동 감시 UI
@@ -333,6 +337,8 @@ watch_frame_inner.pack(fill="x", pady=2)
 tk.Label(watch_frame_inner, text="감시 폴더:").pack(side="left")
 watch_dir_label = tk.Label(watch_frame_inner, text="(선택 없음)", fg="blue")
 watch_dir_label.pack(side="left", padx=5)
+update_watch_dir_label()
+
 btn_watch_dir = tk.Button(watch_frame_inner, text="폴더 찾기", command=select_watch_folder)
 btn_watch_dir.pack(side="right")
 
@@ -341,7 +347,7 @@ filename_frame.pack(fill="x", pady=5)
 tk.Label(filename_frame, text="파일명(확장자포함):").pack(side="left")
 entry_filename = tk.Entry(filename_frame)
 entry_filename.pack(side="left", padx=5, fill="x", expand=True)
-entry_filename.insert(0, "screenshot.png")
+entry_filename.insert(0, target_filename_input)
 
 btn_watch_toggle = tk.Button(auto_frame, text="감시 시작", bg="lightgray", command=toggle_watch)
 btn_watch_toggle.pack(fill="x", pady=5)
@@ -352,7 +358,8 @@ status_label.pack(pady=5)
 btn_start = tk.Button(bottom_frame, text="선택 파일 처리 시작", width=20, command=start_compression, bg="lightblue")
 btn_start.pack(pady=5)
 
-btn_open_folder = tk.Button(bottom_frame, text="저장 폴더 열기", width=20, command=open_save_folder)
+# 하단 버튼 변경: 감시 폴더 열기
+btn_open_folder = tk.Button(bottom_frame, text="감시 폴더 열기", width=20, command=open_watch_folder)
 btn_open_folder.pack(pady=5)
 
 root.mainloop()
