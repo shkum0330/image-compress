@@ -6,10 +6,9 @@ import platform
 import subprocess
 import json
 import time
-import threading
 import shutil
 
-# Watchdog 라이브러리 임포트
+# Watchdog 라이브러리
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
@@ -17,17 +16,18 @@ except ImportError:
     messagebox.showerror("라이브러리 오류", "watchdog 라이브러리가 필요합니다.\npip install watchdog")
     exit()
 
-# TkinterDnD2 라이브러리 임포트
+# TkinterDnD2 라이브러리
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 except ImportError:
     messagebox.showerror("라이브러리 오류", "tkinterdnd2 라이브러리가 필요합니다.\npip install tkinterdnd2")
     exit()
 
-# --- 전역 변수 ---
+# 전역 변수
 CONFIG_FILE = 'compressor_config.json'
 file_list = []
-# 10MB 기준 설정
+
+# 용량(여기선 10MB) 기준 설정
 SIZE_THRESHOLD = 10 * 1024 * 1024
 
 # 설정값 기본 초기화
@@ -39,8 +39,7 @@ observer = None
 target_filename = ""
 is_watching = False
 
-
-# --- 설정 저장/로드 함수 (저장 경로 제거됨) ---
+# 설정 저장/로드 함수 (저장 경로 제거됨)
 def save_config():
     """ 현재 설정(감시폴더, 파일명)을 JSON에 저장 """
     current_filename = "screenshot.png"
@@ -59,7 +58,6 @@ def save_config():
             json.dump(config, f, indent=4)
     except Exception as e:
         print(f"Config 저장 오류: {e}")
-
 
 def load_config():
     """ JSON에서 설정 불러오기 """
@@ -81,16 +79,15 @@ def load_config():
     except (FileNotFoundError, json.JSONDecodeError):
         save_config()
 
-
-# --- 핵심 기능 함수 ---
+# 핵심 기능 함수
 def compress_image(input_path):
     """
-    입력된 파일의 경로(input_path)와 동일한 폴더에 결과물을 저장합니다.
+    입력된 파일의 경로(input_path)와 동일한 폴더에 결과물을 저장
     """
     try:
         time.sleep(0.5)  # 파일 잠금 방지
 
-        # ★ 저장 경로는 원본 파일이 있는 폴더
+        # 저장 경로는 원본 파일이 있는 폴더
         output_dir = os.path.dirname(input_path)
 
         file_size = os.path.getsize(input_path)
@@ -98,7 +95,7 @@ def compress_image(input_path):
         name, ext = os.path.splitext(filename)
 
         if file_size > SIZE_THRESHOLD:
-            # [Case A] 10MB 초과 -> 압축
+            # 10MB 초과 -> 압축
             img = Image.open(input_path)
             new_filename = f"{name}_compressed.jpg"
             output_path = os.path.join(output_dir, new_filename)
@@ -109,7 +106,7 @@ def compress_image(input_path):
             img.save(output_path, "JPEG", quality=85, optimize=True)
             return f"{new_filename} (압축됨)"
         else:
-            # [Case B] 10MB 이하 -> 원본 복사
+            # 10MB 이하 -> 원본 복사
             new_filename = f"{name}_original{ext}"
             output_path = os.path.join(output_dir, new_filename)
 
@@ -122,7 +119,6 @@ def compress_image(input_path):
 
     except Exception as e:
         return f"오류 ({os.path.basename(input_path)}): {e}"
-
 
 def open_watch_folder():
     """ 감시 폴더 열기 (저장 폴더 대신 사용) """
@@ -143,7 +139,7 @@ def open_watch_folder():
         messagebox.showwarning("폴더 열기 실패", f"폴더를 여는 데 실패했습니다: {e}")
 
 
-# --- Watchdog 핸들러 ---
+# Watchdog 핸들러
 class ImageHandler(FileSystemEventHandler):
     def __init__(self):
         self.last_processed_time = 0
@@ -178,7 +174,7 @@ def update_status_from_thread(msg):
     listbox.see(tk.END)
 
 
-# --- 제어 함수 ---
+# 제어 함수
 def select_watch_folder():
     global watch_directory
     path = filedialog.askdirectory(title="감시할 폴더 선택")
@@ -187,7 +183,6 @@ def select_watch_folder():
         update_watch_dir_label()
         save_config()
 
-
 def update_watch_dir_label():
     """ 감시 폴더 레이블 업데이트 """
     if watch_directory:
@@ -195,7 +190,6 @@ def update_watch_dir_label():
         watch_dir_label.config(text=text)
     else:
         watch_dir_label.config(text="(선택 없음)")
-
 
 def toggle_watch():
     global observer, is_watching, target_filename
@@ -235,7 +229,7 @@ def toggle_watch():
             messagebox.showerror("오류", f"감시 시작 실패: {e}")
 
 
-# --- GUI 이벤트 핸들러 ---
+# GUI 이벤트 핸들러
 def add_files_to_list(files_to_add):
     for f in files_to_add:
         f_cleaned = f.strip('{}')
@@ -290,7 +284,7 @@ def start_compression():
     file_list.clear()
 
 
-# --- GUI 생성 ---
+# GUI 생성
 load_config()
 
 root = TkinterDnD.Tk()
@@ -300,11 +294,9 @@ root.minsize(420, 550)
 root.drop_target_register(DND_FILES)
 root.dnd_bind('<<Drop>>', drop_handler)
 
-# --- 프레임 설정 ---
+# 프레임 설정
 top_frame = tk.Frame(root, pady=10)
 top_frame.pack()
-
-# ★ 저장 폴더 프레임 삭제됨 (더 깔끔해짐)
 
 middle_frame = tk.Frame(root, pady=5)
 middle_frame.pack(fill="x")
@@ -318,7 +310,7 @@ auto_frame.pack(fill="x", padx=20, pady=5)
 bottom_frame = tk.Frame(root, pady=10)
 bottom_frame.pack(fill="x")
 
-# --- 위젯 생성 ---
+# 위젯 생성
 btn_select = tk.Button(top_frame, text="파일 선택 (수동)", width=15, command=select_files)
 btn_select.pack()
 
