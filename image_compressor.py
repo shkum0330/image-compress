@@ -39,6 +39,7 @@ observer = None
 target_filename = ""
 is_watching = False
 
+
 # 설정 저장/로드 함수 (저장 경로 제거됨)
 def save_config():
     """ 현재 설정(감시폴더, 파일명)을 JSON에 저장 """
@@ -59,6 +60,7 @@ def save_config():
     except Exception as e:
         print(f"Config 저장 오류: {e}")
 
+
 def load_config():
     """ JSON에서 설정 불러오기 """
     global watch_directory, target_filename_input
@@ -78,6 +80,7 @@ def load_config():
 
     except (FileNotFoundError, json.JSONDecodeError):
         save_config()
+
 
 # 핵심 기능 함수
 def compress_image(input_path):
@@ -119,6 +122,7 @@ def compress_image(input_path):
 
     except Exception as e:
         return f"오류 ({os.path.basename(input_path)}): {e}"
+
 
 def open_watch_folder():
     """ 감시 폴더 열기 (저장 폴더 대신 사용) """
@@ -183,6 +187,7 @@ def select_watch_folder():
         update_watch_dir_label()
         save_config()
 
+
 def update_watch_dir_label():
     """ 감시 폴더 레이블 업데이트 """
     if watch_directory:
@@ -190,6 +195,7 @@ def update_watch_dir_label():
         watch_dir_label.config(text=text)
     else:
         watch_dir_label.config(text="(선택 없음)")
+
 
 def toggle_watch():
     global observer, is_watching, target_filename
@@ -223,7 +229,10 @@ def toggle_watch():
             is_watching = True
             btn_watch_toggle.config(text="감시 중지 (작동 중)", bg="red", fg="white")
             status_label.config(text=f"'{target_filename}' 감시 중...")
-            entry_filename.config(state="disabled")
+
+            # 수정은 안 되지만 복사는 가능
+            entry_filename.config(state="readonly")
+
             btn_watch_dir.config(state="disabled")
         except Exception as e:
             messagebox.showerror("오류", f"감시 시작 실패: {e}")
