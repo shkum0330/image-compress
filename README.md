@@ -3,7 +3,7 @@
 * 사용자가 지정한 특정 이미지 파일을 실시간으로 감시하여 압축하거나, 여러 파일을 드래그 앤 드롭하여 한 번에 처리
 * 저장 폴더 설정 없이, 결과물을 항상 원본 파일과 동일한 위치에 생성
 
-<img src="https://github.com/user-attachments/assets/975aa7a1-2a2d-441f-95ca-250921005157" width="50%" alt="이미지 설명">
+<img src="https://github.com/user-attachments/assets/975aa7a1-2a2d-441f-95ca-250921005157" width="30%" alt="이미지 설명">
 
 ## ✨ 주요 기능
 * **실시간 자동 감시**: 설정된 폴더 내에서 특정 파일(예: `screenshot.jpg`)이 생성되거나 수정되면 즉시 감지하여 처리
